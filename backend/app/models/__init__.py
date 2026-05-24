@@ -54,7 +54,7 @@ class BackupRecord(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     task_id = Column(Integer, ForeignKey("backup_tasks.id"), nullable=False)
-    status = Column(Enum("running", "success", "fail", name="record_status"), nullable=False, default="running")
+    status = Column(Enum("running", "success", "fail", "cancelled", name="record_status"), nullable=False, default="running")
     started_at = Column(DateTime, default=datetime.datetime.utcnow)
     finished_at = Column(DateTime, nullable=True)
     file_path = Column(String(512))

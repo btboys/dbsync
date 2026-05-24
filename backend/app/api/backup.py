@@ -1,3 +1,4 @@
+import os
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -81,11 +82,15 @@ async def run_backup_task(task_id: int, db: AsyncSession = Depends(get_db)):
 @router.get("/backup-records", response_model=List[BackupRecordResponse])
 async def list_backup_records(
     task_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(BackupRecord).order_by(desc(BackupRecord.id))
+    q = select(BackupRecord)
     if task_id:
         q = q.where(BackupRecord.task_id == task_id)
+    if status:
+        q = q.where(BackupRecord.status == status)
+    q = q.order_by(desc(BackupRecord.id))
     result = await db.execute(q)
     return result.scalars().all()
 
@@ -108,3 +113,31 @@ async def restore_backup(record_id: int, db: AsyncSession = Depends(get_db)):
 
     celery_app.send_task("run_restore", args=[record_id])
     return {"record_id": record_id, "status": "restore_started"}
+
+
+@router.post("/backup-records/{record_id}/cancel")
+async def cancel_backup_record(record_id: int, db: AsyncSession = Depends(get_db)):
+    from datetime import datetime
+    from app.models import TaskLog
+
+    result = await db.execute(select(BackupRecord).where(BackupRecord.id == record_id))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(404, "Backup record not found")
+    if record.status != "running":
+        raise HTTPException(400, "Only running records can be cancelled")
+
+    record.status = "cancelled"
+    record.finished_at = datetime.utcnow()
+
+    if record.file_path and os.path.exists(record.file_path):
+        os.unlink(record.file_path)
+
+    db.add(TaskLog(
+        task_type="backup",
+        task_record_id=record_id,
+        level="info",
+        message="Backup cancelled by user",
+    ))
+    await db.commit()
+    return {"record_id": record_id, "status": "cancelled"}
