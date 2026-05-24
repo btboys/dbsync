@@ -118,6 +118,11 @@ celery -A app.worker.app beat --loglevel=info
 ```bash
 cd frontend
 npm install
+
+# 构建前端（生成 dist/）
+npm run build
+
+# 开发模式（热更新）
 npm run dev
 ```
 
