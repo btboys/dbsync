@@ -59,6 +59,7 @@ class BackupRecord(Base):
     finished_at = Column(DateTime, nullable=True)
     file_path = Column(String(512))
     file_size = Column(BigInteger)
+    uncompressed_size = Column(BigInteger, nullable=True)
     checksum = Column(String(64))
     error_message = Column(Text)
     incremental_base_id = Column(Integer, ForeignKey("backup_records.id"), nullable=True)
@@ -109,5 +110,16 @@ class TaskLog(Base):
     task_type = Column(Enum("backup", "migration", "restore", name="log_task_type"), nullable=False)
     task_record_id = Column(Integer, nullable=False)
     level = Column(Enum("info", "warning", "error", name="log_level"), nullable=False, default="info")
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class TaskProcessLog(Base):
+    __tablename__ = "task_process_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_type = Column(Enum("backup", "migration", "restore", name="process_log_task_type"), nullable=False)
+    task_record_id = Column(Integer, nullable=False)
+    level = Column(Enum("info", "warning", "error", name="process_log_level"), nullable=False, default="info")
     message = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

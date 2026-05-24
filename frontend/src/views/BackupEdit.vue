@@ -1,9 +1,9 @@
 <template>
-  <div>
+  <div v-if="task">
     <div class="ds-toolbar">
       <h2 class="ds-page-title" style="margin:0">
         <t-icon name="backup" class="ds-page-title-icon" />
-        新建备份任务
+        编辑备份任务
       </h2>
     </div>
     <div class="ds-card" style="max-width: 640px;">
@@ -33,7 +33,7 @@
           <t-space>
             <t-button theme="primary" type="submit" :loading="submitting">
               <template #icon><t-icon name="check" /></template>
-              创建
+              保存
             </t-button>
             <t-button variant="outline" @click="$router.push('/backup')">取消</t-button>
           </t-space>
@@ -45,30 +45,52 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { MessagePlugin } from "tdesign-vue-next";
 import { api } from "../api/client";
 import CronPicker from "../components/CronPicker.vue";
 
+const route = useRoute();
 const router = useRouter();
 const datasources = ref<any[]>([]);
 const submitting = ref(false);
+const task = ref<any>(null);
 const scheduleCron = ref("");
 const form = ref({
-  name: "", datasource_id: null as number | null, backup_type: "full",
-  compression: true, retention_days: 30, schedule_config: null as any,
+  name: "",
+  datasource_id: null as number | null,
+  backup_type: "full",
+  compression: true,
+  retention_days: 30,
+  schedule_config: null as any,
 });
 
 onMounted(async () => {
-  datasources.value = await api.listDatasources();
+  const id = Number(route.params.id);
+  const [ds, t] = await Promise.all([
+    api.listDatasources(),
+    api.getBackupTask(id),
+  ]);
+  datasources.value = ds;
+  task.value = t;
+  
+  form.value = {
+    name: t.name,
+    datasource_id: t.datasource_id,
+    backup_type: t.backup_type,
+    compression: t.compression,
+    retention_days: t.retention_days,
+    schedule_config: t.schedule_config,
+  };
+  scheduleCron.value = t.schedule_config?.cron || "";
 });
 
 async function handleSubmit() {
   submitting.value = true;
   try {
     form.value.schedule_config = scheduleCron.value ? { cron: scheduleCron.value } : null;
-    await api.createBackupTask(form.value);
-    MessagePlugin.success("创建成功");
+    await api.updateBackupTask(Number(route.params.id), form.value);
+    MessagePlugin.success("保存成功");
     router.push("/backup");
   } catch (e: any) {
     MessagePlugin.error(e.message);

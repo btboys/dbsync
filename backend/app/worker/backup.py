@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.security import decrypt_password
-from app.models import BackupTask, BackupRecord, TaskLog, Datasource
+from app.models import BackupTask, BackupRecord, TaskLog, TaskProcessLog, Datasource
 from app.worker.engines.base import ConnectionInfo
 
 
@@ -21,6 +21,11 @@ def _sync_get_db():
 
 def _log(task_type: str, record_id: int, level: str, msg: str, db: Session):
     db.add(TaskLog(task_type=task_type, task_record_id=record_id, level=level, message=msg))
+    db.commit()
+
+
+def _process_log(task_type: str, record_id: int, level: str, msg: str, db: Session):
+    db.add(TaskProcessLog(task_type=task_type, task_record_id=record_id, level=level, message=msg))
     db.commit()
 
 
@@ -50,14 +55,20 @@ def run_backup(self, record_id: int):
             password=password, database=ds.database,
         )
 
+        _process_log("backup", record_id, "info", f"[步骤 1/3] 连接数据库: {ds.host}:{ds.port}/{ds.database}", db)
+
         timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         filename = f"{ds.name}_{task.backup_type}_{timestamp}"
         storage_path = task.storage_path or settings.storage_path
         os.makedirs(storage_path, exist_ok=True)
         filepath = os.path.join(storage_path, filename)
 
+        _process_log("backup", record_id, "info", f"[步骤 2/3] 开始备份数据到: {filepath}", db)
+
         engine = _get_engine(ds.type)
         dump_file = engine.dump(info, filepath, task.compression)
+
+        _process_log("backup", record_id, "info", f"[步骤 3/3] 备份文件生成完成: {dump_file}", db)
 
         # Re-fetch record to check if cancelled during dump
         record = db.execute(select(BackupRecord).where(BackupRecord.id == record_id)).scalar_one()
@@ -65,18 +76,36 @@ def run_backup(self, record_id: int):
             if os.path.exists(dump_file):
                 os.unlink(dump_file)
             _log("backup", record_id, "info", "Backup was cancelled during execution, file removed", db)
+            _process_log("backup", record_id, "warning", "备份已取消，删除已生成文件", db)
             return
 
+        _process_log("backup", record_id, "info", "正在计算文件校验和...", db)
         sha256 = hashlib.sha256()
         with open(dump_file, "rb") as f:
             for chunk in iter(lambda: f.read(8192), b""):
                 sha256.update(chunk)
         file_size = os.path.getsize(dump_file)
+        
+        # Calculate uncompressed size for compressed backups
+        uncompressed_size = None
+        if dump_file.endswith(".gz"):
+            import gzip
+            with gzip.open(dump_file, "rb") as gz:
+                # Read a bit to get decompressed size estimate
+                # For gzip, we can get the ISIZE field (last 4 bytes)
+                with open(dump_file, "rb") as f_gz:
+                    f_gz.seek(-4, 2)
+                    isize = int.from_bytes(f_gz.read(4), "little")
+                    if isize != 0:
+                        uncompressed_size = isize
+        
+        _process_log("backup", record_id, "info", f"文件大小: {file_size} bytes, 校验和计算完成", db)
 
         record.status = "success"
         record.finished_at = datetime.datetime.utcnow()
         record.file_path = dump_file
         record.file_size = file_size
+        record.uncompressed_size = uncompressed_size
         record.checksum = sha256.hexdigest()
         db.commit()
 

@@ -43,11 +43,22 @@ class BackupRecordResponse(BaseModel):
     id: int
     task_id: int
     status: str
-    started_at: datetime.datetime
+    started_at: Optional[datetime.datetime]
     finished_at: Optional[datetime.datetime]
     file_path: Optional[str]
     file_size: Optional[int]
+    uncompressed_size: Optional[int]
     checksum: Optional[str]
     error_message: Optional[str]
 
     model_config = {"from_attributes": True}
+
+
+class RestoreRequest(BaseModel):
+    target_datasource_id: Optional[int] = None
+    target_host: Optional[str] = None
+    target_port: Optional[int] = None
+    target_username: Optional[str] = None
+    target_password: Optional[str] = None
+    target_database: Optional[str] = None
+    target_db_type: Optional[str] = Field(None, pattern="^(mysql|postgresql)$")

@@ -113,6 +113,9 @@
           <template #finished_at="{ row }">
             {{ fmtDatetime(row.finished_at) }}
           </template>
+          <template #duration="{ row }">
+            {{ formatDuration(row.started_at, row.finished_at) }}
+          </template>
         </t-table>
       </div>
     </div>
@@ -146,6 +149,7 @@ const recordColumns = [
   { colKey: "rows_transferred", title: "传输行数", width: 120 },
   { colKey: "started_at", title: "开始时间" },
   { colKey: "finished_at", title: "完成时间" },
+  { colKey: "duration", title: "运行时间", width: 120 },
 ];
 
 const currentRunning = computed(() => records.value.find((r) => r.status === "running"));
@@ -186,6 +190,18 @@ function formatElapsed(start: string) {
   return `${h}小时${m % 60}分${s % 60}秒`;
 }
 
+function formatDuration(start: string, finish: string | null) {
+  if (!start || !finish) return "-";
+  const diff = toUtcTimestamp(finish) - toUtcTimestamp(start);
+  if (diff < 0) return "-";
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s}秒`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}分${s % 60}秒`;
+  const h = Math.floor(m / 60);
+  return `${h}小时${m % 60}分${s % 60}秒`;
+}
+
 function startElapsedTimer(start: string) {
   if (elapsedTimer) clearInterval(elapsedTimer);
   elapsed.value = formatElapsed(start);
@@ -209,33 +225,29 @@ function scrollToBottom() {
   });
 }
 
-function connectSSE(recordId: number) {
-  disconnectSSE();
-  const lastId = taskLogs.value.length > 0 
-    ? Math.max(...taskLogs.value.map((l) => l.id)) 
-    : 0;
-  const url = `/api/v1/task-logs/stream?task_type=migration&task_record_id=${recordId}&last_id=${lastId}`;
-  eventSource = new EventSource(url);
-  
-  eventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      taskLogs.value.push(data);
-      scrollToBottom();
-    } catch (e) {
-      console.error("SSE parse error:", e);
-    }
-  };
-  
-  eventSource.onerror = (err) => {
-    console.error("SSE error:", err);
-  };
+async function fetchProcessLogs(recordId: number) {
+  try {
+    const res = await api.listTaskProcessLogs({ task_type: "migration", task_record_id: recordId });
+    taskLogs.value = res.items;
+    scrollToBottom();
+  } catch {
+    // ignore
+  }
 }
 
-function disconnectSSE() {
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
+let processLogPollTimer: ReturnType<typeof setInterval> | null = null;
+
+function startProcessLogPolling(recordId: number) {
+  if (processLogPollTimer) return;
+  processLogPollTimer = setInterval(async () => {
+    await fetchProcessLogs(recordId);
+  }, 3000);
+}
+
+function stopProcessLogPolling() {
+  if (processLogPollTimer) {
+    clearInterval(processLogPollTimer);
+    processLogPollTimer = null;
   }
 }
 
@@ -248,7 +260,7 @@ function startStatusPolling() {
     if (!runningRec) {
       stopStatusPolling();
       stopElapsedTimer();
-      disconnectSSE();
+      stopProcessLogPolling();
     }
   }, 5000);
 }
@@ -267,10 +279,9 @@ onMounted(async () => {
   records.value = await api.listMigrationRecords(id);
   const runningRec = records.value.find((r) => r.status === "running");
   if (runningRec) {
-    taskLogs.value = await api.listTaskLogs({ task_type: "migration", task_record_id: runningRec.id });
-    scrollToBottom();
+    await fetchProcessLogs(runningRec.id);
     startElapsedTimer(runningRec.started_at);
-    connectSSE(runningRec.id);
+    startProcessLogPolling(runningRec.id);
     startStatusPolling();
   }
 });
@@ -278,7 +289,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopStatusPolling();
   stopElapsedTimer();
-  disconnectSSE();
+  stopProcessLogPolling();
 });
 
 async function handleRun() {
@@ -292,7 +303,7 @@ async function handleRun() {
     if (runningRec) {
       taskLogs.value = [];
       startElapsedTimer(runningRec.started_at);
-      connectSSE(runningRec.id);
+      startProcessLogPolling(runningRec.id);
       startStatusPolling();
     }
   } catch (e: any) {
@@ -312,7 +323,7 @@ async function handleCancel() {
     records.value = await api.listMigrationRecords(id);
     stopElapsedTimer();
     stopStatusPolling();
-    disconnectSSE();
+    stopProcessLogPolling();
   } catch (e: any) {
     MessagePlugin.error(e.message);
   } finally {

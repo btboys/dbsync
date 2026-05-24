@@ -19,6 +19,7 @@ class DatasourceCreate(BaseModel):
 
 class DatasourceUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=64)
+    type: Optional[str] = Field(None, pattern="^(mysql|postgresql)$")
     host: Optional[str] = Field(None, max_length=255)
     port: Optional[int] = None
     username: Optional[str] = Field(None, max_length=64)

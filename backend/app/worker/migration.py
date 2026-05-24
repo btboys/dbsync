@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.security import decrypt_password
-from app.models import MigrationTask, MigrationRecord, Datasource, TaskLog
+from app.models import MigrationTask, MigrationRecord, Datasource, TaskLog, TaskProcessLog
 from app.worker.engines.base import ConnectionInfo
 
 
@@ -50,6 +50,16 @@ def _get_engine(db_type: str):
     raise ValueError(f"Unsupported database type: {db_type}")
 
 
+def _log(task_type: str, record_id: int, level: str, msg: str, db: Session):
+    db.add(TaskLog(task_type=task_type, task_record_id=record_id, level=level, message=msg))
+    db.commit()
+
+
+def _process_log(task_type: str, record_id: int, level: str, msg: str, db: Session):
+    db.add(TaskProcessLog(task_type=task_type, task_record_id=record_id, level=level, message=msg))
+    db.commit()
+
+
 @celery_app.task(bind=True, name="run_migration")
 def run_migration(self, record_id: int):
     db = _sync_get_db()
@@ -59,9 +69,7 @@ def run_migration(self, record_id: int):
         src_ds = db.execute(select(Datasource).where(Datasource.id == task.source_datasource_id)).scalar_one()
         tgt_ds = db.execute(select(Datasource).where(Datasource.id == task.target_datasource_id)).scalar_one()
 
-        db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
-                       message=f"[开始] 从 {src_ds.name} 迁移到 {tgt_ds.name}"))
-        db.commit()
+        _log("migration", record_id, "info", f"[开始] 从 {src_ds.name} 迁移到 {tgt_ds.name}", db)
 
         src_pwd = decrypt_password(src_ds.password)
         tgt_pwd = decrypt_password(tgt_ds.password)
@@ -78,22 +86,17 @@ def run_migration(self, record_id: int):
         total_steps = len(steps)
 
         step = 1
-        db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
-                       message=f"[步骤 {step}/{total_steps}] 连接源数据库: {src_ds.host}:{src_ds.port}/{src_ds.database}"))
-        db.commit()
+        _process_log("migration", record_id, "info",
+                     f"[步骤 {step}/{total_steps}] 连接源数据库: {src_ds.host}:{src_ds.port}/{src_ds.database}", db)
 
         if task.transfer_type in ("schema_only", "schema_and_data"):
             step += 1
-            db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
-                           message=f"[步骤 {step}/{total_steps}] 传输表结构"))
-            db.commit()
+            _process_log("migration", record_id, "info", f"[步骤 {step}/{total_steps}] 传输表结构", db)
             _run_schema_transfer(src_ds, tgt_ds, src_pwd, tgt_pwd, same_type, record_id, db)
 
         if task.transfer_type in ("data_only", "schema_and_data"):
             step += 1
-            db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
-                           message=f"[步骤 {step}/{total_steps}] 迁移数据"))
-            db.commit()
+            _process_log("migration", record_id, "info", f"[步骤 {step}/{total_steps}] 迁移数据", db)
             rows = _run_data_migration(
                 src_ds, tgt_ds, src_pwd, tgt_pwd,
                 task.table_include, task.table_exclude, record_id, db,
@@ -105,9 +108,7 @@ def run_migration(self, record_id: int):
         record.rows_transferred = total_rows
         db.commit()
 
-        db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
-                       message=f"Migration completed, {total_rows} rows transferred"))
-        db.commit()
+        _log("migration", record_id, "info", f"Migration completed, {total_rows} rows transferred", db)
 
     except Exception as e:
         record = db.execute(select(MigrationRecord).where(MigrationRecord.id == record_id)).scalar_one()
@@ -115,8 +116,7 @@ def run_migration(self, record_id: int):
         record.finished_at = datetime.datetime.utcnow()
         record.error_message = str(e)
         db.commit()
-        db.add(TaskLog(task_type="migration", task_record_id=record_id, level="error", message=str(e)))
-        db.commit()
+        _log("migration", record_id, "error", str(e), db)
         raise
     finally:
         db.close()
@@ -142,9 +142,7 @@ def _run_schema_transfer(src_ds, tgt_ds, src_pwd, tgt_pwd, same_type, record_id,
     else:
         _run_cross_schema_apply(tmp_path, tgt_ds, tgt_pwd, src_ds.type, tgt_ds.type, record_id, db)
 
-    db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
-                   message=f"Schema transfer completed"))
-    db.commit()
+    _log("migration", record_id, "info", "Schema transfer completed", db)
 
 
 def _run_cross_schema_apply(schema_path, tgt_ds, tgt_pwd, src_type, tgt_type, record_id, db):
@@ -173,9 +171,7 @@ def _run_cross_schema_apply(schema_path, tgt_ds, tgt_pwd, src_type, tgt_type, re
                     try:
                         cur.execute(stmt)
                     except Exception as e:
-                        db.add(TaskLog(task_type="migration", task_record_id=record_id,
-                                       level="warning", message=f"Schema stmt skip: {e}"))
-                        db.commit()
+                        _process_log("migration", record_id, "warning", f"Schema stmt skip: {e}", db)
         conn.commit()
     finally:
         conn.close()
@@ -183,6 +179,8 @@ def _run_cross_schema_apply(schema_path, tgt_ds, tgt_pwd, src_type, tgt_type, re
 
 def _run_data_migration(src_ds, tgt_ds, src_pwd, tgt_pwd,
                          include_tables, exclude_tables, record_id, db):
+    BATCH_SIZE = 1000
+
     if src_ds.type == "mysql":
         src_conn = pymysql.connect(
             host=src_ds.host, port=src_ds.port, user=src_ds.username,
@@ -230,44 +228,65 @@ def _run_data_migration(src_ds, tgt_ds, src_pwd, tgt_pwd,
         total = 0
         table_count = len(tables)
         for idx, table in enumerate(tables, 1):
-            db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
-                           message=f"[进度] 正在迁移表 {table} ({idx}/{table_count})"))
-            db.commit()
+            _process_log("migration", record_id, "info", f"[进度] 正在迁移表 {table} ({idx}/{table_count})", db)
             try:
                 src_cursor.execute(f"SELECT * FROM `{table}`" if src_ds.type == "mysql" else f'SELECT * FROM "{table}"')
             except Exception:
-                db.add(TaskLog(task_type="migration", task_record_id=record_id, level="warning",
-                               message=f"跳过表 {table}: 查询失败"))
-                db.commit()
+                _process_log("migration", record_id, "warning", f"跳过表 {table}: 查询失败", db)
                 continue
-            rows = src_cursor.fetchall()
-            if not rows:
-                db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
-                               message=f"表 {table} 为空，跳过"))
-                db.commit()
-                continue
+
             col_names = [desc[0] for desc in src_cursor.description]
             placeholders = ",".join(["%s"] * len(col_names))
             cols = ",".join(
                 f"`{c}`" if tgt_ds.type == "mysql" else f'"{c}"' for c in col_names
             )
+            insert_sql = f"INSERT INTO {table} ({cols}) VALUES ({placeholders})"
+
             table_rows = 0
-            for row in rows:
+            batch = []
+            while True:
+                rows = src_cursor.fetchmany(BATCH_SIZE)
+                if not rows:
+                    break
+                batch.extend(rows)
+
+                if len(batch) >= BATCH_SIZE:
+                    try:
+                        tgt_cursor.executemany(insert_sql, batch)
+                        total += len(batch)
+                        table_rows += len(batch)
+                    except Exception as err:
+                        _process_log("migration", record_id, "warning", f"批量插入失败 {table}: {err}，回退到逐行插入", db)
+                        for row in batch:
+                            try:
+                                tgt_cursor.execute(insert_sql, row)
+                                total += 1
+                                table_rows += 1
+                            except Exception as row_err:
+                                _process_log("migration", record_id, "warning", f"跳过行 {table}: {row_err}", db)
+                    batch = []
+                    tgt_conn.commit()
+
+            if batch:
                 try:
-                    tgt_cursor.execute(
-                        f"INSERT INTO {table} ({cols}) VALUES ({placeholders})", row
-                    )
-                    total += 1
-                    table_rows += 1
-                except Exception as row_err:
-                    db.add(TaskLog(task_type="migration", task_record_id=record_id,
-                                   level="warning",
-                                   message=f"跳过行 {table}: {row_err}"))
-                    db.commit()
-            tgt_conn.commit()
-            db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
-                           message=f"表 {table} 完成，迁移 {table_rows} 行"))
-            db.commit()
+                    tgt_cursor.executemany(insert_sql, batch)
+                    total += len(batch)
+                    table_rows += len(batch)
+                except Exception as err:
+                    _process_log("migration", record_id, "warning", f"批量插入失败 {table}: {err}，回退到逐行插入", db)
+                    for row in batch:
+                        try:
+                            tgt_cursor.execute(insert_sql, row)
+                            total += 1
+                            table_rows += 1
+                        except Exception as row_err:
+                            _process_log("migration", record_id, "warning", f"跳过行 {table}: {row_err}", db)
+                tgt_conn.commit()
+
+            if table_rows == 0:
+                _process_log("migration", record_id, "info", f"表 {table} 为空，跳过", db)
+            else:
+                _process_log("migration", record_id, "info", f"表 {table} 完成，迁移 {table_rows} 行", db)
 
         return total
     finally:

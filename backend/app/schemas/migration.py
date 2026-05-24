@@ -13,6 +13,15 @@ class MigrationTaskCreate(BaseModel):
     transfer_type: str = Field(..., pattern="^(schema_only|data_only|schema_and_data)$")
 
 
+class MigrationTaskUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=128)
+    source_datasource_id: Optional[int] = None
+    target_datasource_id: Optional[int] = None
+    table_include: Optional[list[str]] = None
+    table_exclude: Optional[list[str]] = None
+    transfer_type: Optional[str] = Field(None, pattern="^(schema_only|data_only|schema_and_data)$")
+
+
 class MigrationTaskResponse(BaseModel):
     id: int
     name: str

@@ -40,8 +40,10 @@ export const api = {
   listBackupRecords: (taskId?: number, status?: string) =>
     request<any[]>(`/backup-records?${taskId ? `task_id=${taskId}&` : ""}${status ? `status=${status}` : ""}`),
   getBackupRecord: (id: number) => request<any>(`/backup-records/${id}`),
-  restoreBackup: (id: number) =>
-    request<any>(`/backup-records/${id}/restore`, { method: "POST" }),
+  restoreBackup: (id: number, target?: any) =>
+    request<any>(`/backup-records/${id}/restore`, { method: "POST", body: JSON.stringify(target || {}) }),
+  deleteBackupRecord: (id: number) =>
+    request<void>(`/backup-records/${id}`, { method: "DELETE" }),
   cancelBackupRecord: (id: number) =>
     request<any>(`/backup-records/${id}/cancel`, { method: "POST" }),
 
@@ -62,8 +64,16 @@ export const api = {
     request<any>(`/migration-records/${id}/cancel`, { method: "POST" }),
 
   // Logs
-  listTaskLogs: (params?: { task_type?: string; task_record_id?: number; level?: string }) => {
+  listTaskLogs: (params?: { task_type?: string; task_record_id?: number; level?: string; limit?: number; offset?: number }) => {
     const search = params ? new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString() : "";
-    return request<any[]>(`/task-logs${search ? `?${search}` : ""}`);
+    return request<any>(`/task-logs${search ? `?${search}` : ""}`);
+  },
+  listTaskProcessLogs: (params?: { task_type?: string; task_record_id?: number; level?: string; limit?: number; offset?: number }) => {
+    const search = params ? new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString() : "";
+    return request<any>(`/task-process-logs${search ? `?${search}` : ""}`);
+  },
+  listRestoreRecords: (params?: { limit?: number; offset?: number }) => {
+    const search = params ? new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString() : "";
+    return request<any>(`/restore-records${search ? `?${search}` : ""}`);
   },
 };
