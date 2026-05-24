@@ -41,9 +41,12 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { MessagePlugin } from "tdesign-vue-next";
 import { useBackupStore } from "../stores";
 import { api } from "../api/client";
+
+const router = useRouter();
 
 const backupStore = useBackupStore();
 const recordCounts = ref<Record<number, number>>({});
@@ -80,6 +83,8 @@ async function handleRun(row: any) {
   try {
     await backupStore.runTask(row.id);
     MessagePlugin.success("备份任务已触发");
+    // 跳转到备份任务详情页
+    router.push(`/backup/${row.id}`);
   } catch (e: any) {
     MessagePlugin.error(e.message);
   }

@@ -35,9 +35,11 @@
 
 <script setup lang="ts">
 import { onMounted } from "vue";
+import { useRouter } from "vue-router";
 import { MessagePlugin } from "tdesign-vue-next";
 import { useMigrationStore } from "../stores";
 
+const router = useRouter();
 const migrationStore = useMigrationStore();
 
 const columns = [
@@ -54,6 +56,8 @@ async function handleRun(row: any) {
   try {
     await migrationStore.runTask(row.id);
     MessagePlugin.success("迁移任务已触发");
+    // 跳转到迁移任务详情页
+    router.push(`/migration/${row.id}`);
   } catch (e: any) {
     MessagePlugin.error(e.message);
   }
