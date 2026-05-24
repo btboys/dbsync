@@ -10,7 +10,7 @@ from app.celery_app import celery_app
 from app.models import BackupTask, BackupRecord
 from app.schemas.backup import (
     BackupTaskCreate, BackupTaskUpdate, BackupTaskResponse,
-    BackupRecordResponse,
+    BackupRecordResponse, RestoreRequest,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["backup"])
@@ -105,14 +105,28 @@ async def get_backup_record(record_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/backup-records/{record_id}/restore")
-async def restore_backup(record_id: int, db: AsyncSession = Depends(get_db)):
+async def restore_backup(record_id: int, body: RestoreRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BackupRecord).where(BackupRecord.id == record_id))
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(404, "Backup record not found")
 
-    celery_app.send_task("run_restore", args=[record_id])
+    # Build target connection info
+    target = body.model_dump(exclude_unset=True)
+    celery_app.send_task("run_restore", args=[record_id, target])
     return {"record_id": record_id, "status": "restore_started"}
+
+
+@router.delete("/backup-records/{record_id}", status_code=204)
+async def delete_backup_record(record_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(BackupRecord).where(BackupRecord.id == record_id))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(404, "Backup record not found")
+    if record.file_path and os.path.exists(record.file_path):
+        os.unlink(record.file_path)
+    await db.delete(record)
+    await db.commit()
 
 
 @router.post("/backup-records/{record_id}/cancel")

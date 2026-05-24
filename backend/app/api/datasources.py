@@ -76,26 +76,25 @@ async def test_datasource(ds_id: int, db: AsyncSession = Depends(get_db)):
     password = decrypt_password(ds.password)
 
     try:
+        ssl_flag = "--skip-ssl-verify-server-cert"
         if ds.type == "mysql":
-            import aiomysql
-            conn = await asyncio.wait_for(
-                aiomysql.connect(
-                    host=ds.host, port=ds.port, user=ds.username,
-                    password=password, db=ds.database, connect_timeout=5,
-                ),
-                timeout=10,
-            )
-            conn.close()
+            import subprocess
+            args = ["mysql", ssl_flag,
+                    f"--host={ds.host}", f"--port={ds.port}",
+                    f"--user={ds.username}", f"--password={password}",
+                    ds.database, "-e", "SELECT 1"]
+            result = subprocess.run(args, capture_output=True, text=True, timeout=15)
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or f"Exit code {result.returncode}")
         elif ds.type == "postgresql":
-            import asyncpg
-            conn = await asyncio.wait_for(
-                asyncpg.connect(
-                    host=ds.host, port=ds.port, user=ds.username,
-                    password=password, database=ds.database, timeout=5,
-                ),
-                timeout=10,
+            import subprocess
+            result = subprocess.run(
+                ["psql", f"postgresql://{ds.username}:{password}@{ds.host}:{ds.port}/{ds.database}",
+                 "-c", "SELECT 1"],
+                capture_output=True, text=True, timeout=15,
             )
-            await conn.close()
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or f"Exit code {result.returncode}")
         return {"status": "ok", "message": "Connection successful"}
     except Exception as e:
         raise HTTPException(400, detail=f"Connection failed: {str(e)}")

@@ -1,0 +1,250 @@
+:root {
+  /* Design System: DBSync - Data-Dense Dashboard */
+  --ds-primary: #6366F1;
+  --ds-primary-light: #818CF8;
+  --ds-primary-dark: #4F46E5;
+  --ds-cta: #10B981;
+  --ds-cta-light: #34D399;
+  --ds-bg: #F5F3FF;
+  --ds-bg-card: #FFFFFF;
+  --ds-text: #1E1B4B;
+  --ds-text-secondary: #6B7280;
+  --ds-border: #E5E7EB;
+  --ds-sidebar-bg: #1E1B4B;
+  --ds-sidebar-text: #C7D2FE;
+  --ds-sidebar-active: #6366F1;
+  --ds-success: #10B981;
+  --ds-warning: #F59E0B;
+  --ds-danger: #EF4444;
+  --ds-info: #6366F1;
+  --ds-radius: 8px;
+  --ds-radius-lg: 12px;
+  --ds-shadow: 0 1px 3px rgba(30, 27, 75, 0.08), 0 1px 2px rgba(30, 27, 75, 0.06);
+  --ds-shadow-md: 0 4px 6px rgba(30, 27, 75, 0.07), 0 2px 4px rgba(30, 27, 75, 0.05);
+  --ds-shadow-lg: 0 10px 15px rgba(30, 27, 75, 0.08), 0 4px 6px rgba(30, 27, 75, 0.05);
+  --ds-transition: all 0.2s ease;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Fira Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--ds-bg);
+  color: var(--ds-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Fira Code', monospace;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* TDesign overrides for indigo theme */
+:root {
+  --td-brand-color: var(--ds-primary);
+  --td-font-family: 'Fira Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --td-font-family-medium: 'Fira Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --td-border-radius-default: var(--ds-radius);
+  --td-shadow-inset-top: none;
+  --td-shadow-inset-right: none;
+  --td-shadow-inset-bottom: none;
+  --td-shadow-inset-left: none;
+}
+
+/* Card styling */
+.ds-card {
+  background: var(--ds-bg-card);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-shadow);
+  padding: 20px;
+  transition: var(--ds-transition);
+}
+
+.ds-card:hover {
+  box-shadow: var(--ds-shadow-md);
+}
+
+.ds-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ds-border);
+}
+
+.ds-card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ds-text);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* KPI card */
+.ds-kpi {
+  background: var(--ds-bg-card);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-shadow);
+  padding: 20px;
+  transition: var(--ds-transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.ds-kpi:hover {
+  box-shadow: var(--ds-shadow-md);
+  transform: translateY(-1px);
+}
+
+.ds-kpi::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--ds-primary);
+  border-radius: 0 4px 4px 0;
+}
+
+.ds-kpi.cta::before {
+  background: var(--ds-cta);
+}
+
+.ds-kpi.warning::before {
+  background: var(--ds-warning);
+}
+
+.ds-kpi-value {
+  font-family: 'Fira Code', monospace;
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--ds-text);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.ds-kpi-label {
+  font-size: 13px;
+  color: var(--ds-text-secondary);
+  font-weight: 500;
+}
+
+.ds-kpi-sub {
+  font-size: 12px;
+  color: var(--ds-text-secondary);
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* KPI grid */
+.ds-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 640px) {
+  .ds-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+  .ds-kpi-value {
+    font-size: 26px;
+  }
+}
+
+/* Page title */
+.ds-page-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ds-text);
+  margin: 0 0 20px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ds-page-title-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--ds-primary);
+}
+
+/* Toolbar */
+.ds-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Loading skeleton */
+.ds-skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e4e4e4 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: ds-shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+@keyframes ds-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Stat number (Dashboard) */
+.stat-number {
+  font-family: 'Fira Code', monospace;
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--ds-primary);
+  text-align: center;
+  padding: 16px;
+}
+
+/* Tags table cells */
+.td-tag {
+  font-family: 'Fira Code', monospace;
+  font-size: 12px;
+}
+
+/* Empty state */
+.ds-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--ds-text-secondary);
+}
+
+.ds-empty-icon {
+  font-size: 48px;
+  color: var(--ds-border);
+  margin-bottom: 12px;
+}
+
+/* Responsive table wrapper */
+.ds-table-wrap {
+  overflow-x: auto;
+  margin: 0 -20px;
+  padding: 0 20px;
+}
+
+@media (max-width: 768px) {
+  .ds-card {
+    padding: 16px;
+  }
+  .ds-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}

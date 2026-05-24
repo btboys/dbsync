@@ -13,7 +13,7 @@ class ConnectionInfo:
 
 class DatabaseEngine(ABC):
     @abstractmethod
-    def dump_cmd(self, info: ConnectionInfo, output_path: str, compression: bool) -> list[str]:
+    def dump(self, info: ConnectionInfo, output_path: str, compression: bool) -> str:
         ...
 
     @abstractmethod

@@ -2,17 +2,23 @@
 frontend/node_modules/
 frontend/dist/
 
+# Docs
+docs/superpowers/
+
 # Backend
 __pycache__/
 *.pyc
 .eggs/
 *.egg-info/
+celerybeat-schedule
+backend/celerybeat-schedule
 
 # DevOps
 .env
 
 # IDE
 .idea/
+.setting/
 .vscode/
 *.swp
 *.swo
@@ -20,3 +26,6 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# TypeScript
+*.tsbuildinfo

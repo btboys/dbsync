@@ -53,12 +53,13 @@
     <t-dialog
       v-model:visible="confirmVisible"
       header="确认恢复"
-      :body="confirmBody"
       confirm-btn="确认恢复"
       cancel-btn="取消"
       theme="warning"
       @confirm="executeRestore"
-    />
+    >
+      <div style="white-space: pre-line;">{{ confirmBody }}</div>
+    </t-dialog>
   </div>
 </template>
 
@@ -99,7 +100,7 @@ onUnmounted(() => {
 
 function confirmRestore(row: any) {
   selectedRecord.value = row;
-  confirmBody.value = `确定要从备份记录 #${row.id} 恢复吗？<br/>文件: ${row.file_path || '未知'}`;
+  confirmBody.value = `确定要从备份记录 #${row.id} 恢复吗？\n文件: ${row.file_path || '未知'}`;
   confirmVisible.value = true;
 }
 
