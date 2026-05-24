@@ -60,7 +60,7 @@ def run_migration(self, record_id: int):
         tgt_ds = db.execute(select(Datasource).where(Datasource.id == task.target_datasource_id)).scalar_one()
 
         db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
-                       message=f"Migration from {src_ds.name} to {tgt_ds.name} started"))
+                       message=f"[开始] 从 {src_ds.name} 迁移到 {tgt_ds.name}"))
         db.commit()
 
         src_pwd = decrypt_password(src_ds.password)
@@ -69,10 +69,31 @@ def run_migration(self, record_id: int):
         same_type = src_ds.type == tgt_ds.type
         total_rows = 0
 
+        # 计算总步骤数
+        steps = ["连接源数据库"]
         if task.transfer_type in ("schema_only", "schema_and_data"):
+            steps.append("传输表结构")
+        if task.transfer_type in ("data_only", "schema_and_data"):
+            steps.append("迁移数据")
+        total_steps = len(steps)
+
+        step = 1
+        db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
+                       message=f"[步骤 {step}/{total_steps}] 连接源数据库: {src_ds.host}:{src_ds.port}/{src_ds.database}"))
+        db.commit()
+
+        if task.transfer_type in ("schema_only", "schema_and_data"):
+            step += 1
+            db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
+                           message=f"[步骤 {step}/{total_steps}] 传输表结构"))
+            db.commit()
             _run_schema_transfer(src_ds, tgt_ds, src_pwd, tgt_pwd, same_type, record_id, db)
 
         if task.transfer_type in ("data_only", "schema_and_data"):
+            step += 1
+            db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
+                           message=f"[步骤 {step}/{total_steps}] 迁移数据"))
+            db.commit()
             rows = _run_data_migration(
                 src_ds, tgt_ds, src_pwd, tgt_pwd,
                 task.table_include, task.table_exclude, record_id, db,
@@ -207,31 +228,46 @@ def _run_data_migration(src_ds, tgt_ds, src_pwd, tgt_pwd,
             tables = all_tables
 
         total = 0
-        for table in tables:
+        table_count = len(tables)
+        for idx, table in enumerate(tables, 1):
+            db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
+                           message=f"[进度] 正在迁移表 {table} ({idx}/{table_count})"))
+            db.commit()
             try:
                 src_cursor.execute(f"SELECT * FROM `{table}`" if src_ds.type == "mysql" else f'SELECT * FROM "{table}"')
             except Exception:
+                db.add(TaskLog(task_type="migration", task_record_id=record_id, level="warning",
+                               message=f"跳过表 {table}: 查询失败"))
+                db.commit()
                 continue
             rows = src_cursor.fetchall()
             if not rows:
+                db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
+                               message=f"表 {table} 为空，跳过"))
+                db.commit()
                 continue
             col_names = [desc[0] for desc in src_cursor.description]
             placeholders = ",".join(["%s"] * len(col_names))
             cols = ",".join(
                 f"`{c}`" if tgt_ds.type == "mysql" else f'"{c}"' for c in col_names
             )
+            table_rows = 0
             for row in rows:
                 try:
                     tgt_cursor.execute(
                         f"INSERT INTO {table} ({cols}) VALUES ({placeholders})", row
                     )
                     total += 1
+                    table_rows += 1
                 except Exception as row_err:
                     db.add(TaskLog(task_type="migration", task_record_id=record_id,
                                    level="warning",
-                                   message=f"Row skip {table}: {row_err}"))
+                                   message=f"跳过行 {table}: {row_err}"))
                     db.commit()
             tgt_conn.commit()
+            db.add(TaskLog(task_type="migration", task_record_id=record_id, level="info",
+                           message=f"表 {table} 完成，迁移 {table_rows} 行"))
+            db.commit()
 
         return total
     finally:

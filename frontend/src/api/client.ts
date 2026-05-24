@@ -58,6 +58,8 @@ export const api = {
     request<any>(`/migration-tasks/${id}/run`, { method: "POST" }),
   listMigrationRecords: (taskId?: number, status?: string) =>
     request<any[]>(`/migration-records?${taskId ? `task_id=${taskId}&` : ""}${status ? `status=${status}` : ""}`),
+  cancelMigrationRecord: (id: number) =>
+    request<any>(`/migration-records/${id}/cancel`, { method: "POST" }),
 
   // Logs
   listTaskLogs: (params?: { task_type?: string; task_record_id?: number; level?: string }) => {

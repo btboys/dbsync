@@ -72,7 +72,6 @@
         <h3 class="ds-card-title">
           <t-icon name="file" />
           执行记录
-          <t-loading v-if="polling" loading size="small" indicator />
         </h3>
       </div>
       <div class="ds-table-wrap">
@@ -102,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
 import { useRoute } from "vue-router";
 import { MessagePlugin } from "tdesign-vue-next";
 import { api } from "../api/client";
@@ -113,11 +112,11 @@ const task = ref<any>(null);
 const records = ref<any[]>([]);
 const taskLogs = ref<any[]>([]);
 const running = ref(false);
-const polling = ref(false);
 const cancelling = ref(false);
-let pollTimer: ReturnType<typeof setInterval> | null = null;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 const elapsed = ref("");
+let eventSource: EventSource | null = null;
+let statusPollTimer: ReturnType<typeof setInterval> | null = null;
 
 const recordColumns = [
   { colKey: "id", title: "ID", width: 80 },
@@ -135,12 +134,20 @@ const latestError = computed(() => {
   return failed?.error_message || null;
 });
 
+function toUtcTimestamp(val: string): number {
+  const raw = val.includes("T") && !val.endsWith("Z") ? val + "Z" : val;
+  return new Date(raw).getTime();
+}
+
 function formatElapsed(start: string) {
-  const diff = Date.now() - new Date(start).getTime();
+  const diff = Date.now() - toUtcTimestamp(start);
+  if (diff < 0) return "0秒";
   const s = Math.floor(diff / 1000);
   if (s < 60) return `${s}秒`;
   const m = Math.floor(s / 60);
-  return `${m}分${s % 60}秒`;
+  if (m < 60) return `${m}分${s % 60}秒`;
+  const h = Math.floor(m / 60);
+  return `${h}小时${m % 60}分${s % 60}秒`;
 }
 
 function startElapsedTimer(start: string) {
@@ -158,39 +165,58 @@ function stopElapsedTimer() {
   }
 }
 
-async function fetchTaskLogs(recordId: number) {
-  try {
-    taskLogs.value = await api.listTaskLogs({ task_type: "backup", task_record_id: recordId });
-  } catch {
-    // ignore
+function connectSSE(recordId: number) {
+  disconnectSSE();
+  const lastId = taskLogs.value.length > 0 
+    ? Math.max(...taskLogs.value.map((l) => l.id)) 
+    : 0;
+  const url = `/api/v1/task-logs/stream?task_type=backup&task_record_id=${recordId}&last_id=${lastId}`;
+  eventSource = new EventSource(url);
+  
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      taskLogs.value.push(data);
+      nextTick(() => {
+        const container = document.querySelector('.log-timeline');
+        if (container) container.scrollTop = container.scrollHeight;
+      });
+    } catch (e) {
+      console.error("SSE parse error:", e);
+    }
+  };
+  
+  eventSource.onerror = (err) => {
+    console.error("SSE error:", err);
+  };
+}
+
+function disconnectSSE() {
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
   }
 }
 
-function startPolling() {
-  if (pollTimer) return;
-  polling.value = true;
+function startStatusPolling() {
+  if (statusPollTimer) return;
   const id = Number(route.params.id);
-  pollTimer = setInterval(async () => {
+  statusPollTimer = setInterval(async () => {
     records.value = await api.listBackupRecords(id);
     const runningRec = records.value.find((r) => r.status === "running");
-    if (runningRec) {
-      await fetchTaskLogs(runningRec.id);
-      if (elapsedTimer === null) {
-        startElapsedTimer(runningRec.started_at);
-      }
-    } else {
+    if (!runningRec) {
+      stopStatusPolling();
       stopElapsedTimer();
-      stopPolling();
+      disconnectSSE();
     }
-  }, 3000);
+  }, 5000);
 }
 
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
+function stopStatusPolling() {
+  if (statusPollTimer) {
+    clearInterval(statusPollTimer);
+    statusPollTimer = null;
   }
-  polling.value = false;
 }
 
 onMounted(async () => {
@@ -199,15 +225,17 @@ onMounted(async () => {
   records.value = await api.listBackupRecords(id);
   const runningRec = records.value.find((r) => r.status === "running");
   if (runningRec) {
-    await fetchTaskLogs(runningRec.id);
+    taskLogs.value = await api.listTaskLogs({ task_type: "backup", task_record_id: runningRec.id });
     startElapsedTimer(runningRec.started_at);
-    startPolling();
+    connectSSE(runningRec.id);
+    startStatusPolling();
   }
 });
 
 onUnmounted(() => {
-  stopPolling();
+  stopStatusPolling();
   stopElapsedTimer();
+  disconnectSSE();
 });
 
 async function handleRun() {
@@ -219,9 +247,10 @@ async function handleRun() {
     records.value = await api.listBackupRecords(id);
     const runningRec = records.value.find((r) => r.status === "running");
     if (runningRec) {
-      await fetchTaskLogs(runningRec.id);
+      taskLogs.value = [];
       startElapsedTimer(runningRec.started_at);
-      startPolling();
+      connectSSE(runningRec.id);
+      startStatusPolling();
     }
   } catch (e: any) {
     MessagePlugin.error(e.message);
@@ -239,7 +268,8 @@ async function handleCancel() {
     const id = Number(route.params.id);
     records.value = await api.listBackupRecords(id);
     stopElapsedTimer();
-    stopPolling();
+    stopStatusPolling();
+    disconnectSSE();
   } catch (e: any) {
     MessagePlugin.error(e.message);
   } finally {
